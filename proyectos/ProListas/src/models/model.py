@@ -1,10 +1,14 @@
 """
 models/model.py
 ---------------
+Estructuras de datos de la aplicación: listas doblemente enlazadas.
+
+Cada nodo mantiene referencias bidireccionales (anterior y siguiente) y cada
+lista conserva punteros a la cabeza y a la cola, lo que permite insertar al
+final en O(1) y recorrer la estructura en ambos sentidos.
 """
 
 from datetime import datetime
-
 
 # ── CONSTANTES ────────────────────────────────────────────────────────────────
 
@@ -17,7 +21,7 @@ ESTADO_COMPLETADA = "completada"
 
 class NodoTarea:
     """
-    Nodo de la lista enlazada de tareas.
+    Nodo de la lista doblemente enlazada de tareas.
 
     Atributos
     ----------
@@ -28,9 +32,12 @@ class NodoTarea:
     prioridad : str
         Nivel de urgencia: 'alta', 'media' o 'baja'.
     fecha_creacion : datetime
-        Momento exacto en que se creó el nodo.
+        Momento exacto en que se creó el nodo. Puede restaurarse
+        desde la persistencia.
     estado : str
         'pendiente' o 'completada'.
+    anterior : NodoTarea | None
+        Puntero al nodo previo de la lista.
     siguiente : NodoTarea | None
         Puntero al siguiente nodo de la lista.
     """
@@ -40,12 +47,15 @@ class NodoTarea:
         titulo: str,
         descripcion: str = "",
         prioridad: str = "media",
+        estado: str = ESTADO_PENDIENTE,
+        fecha_creacion: datetime | None = None,
     ) -> None:
         self.titulo: str = titulo
         self.descripcion: str = descripcion
         self.prioridad: str = prioridad
-        self.fecha_creacion: datetime = datetime.now()
-        self.estado: str = ESTADO_PENDIENTE
+        self.fecha_creacion: datetime = fecha_creacion or datetime.now()
+        self.estado: str = estado
+        self.anterior: "NodoTarea | None" = None
         self.siguiente: "NodoTarea | None" = None
 
     def to_dict(self) -> dict:
@@ -59,16 +69,20 @@ class NodoTarea:
         }
 
 
-# ── LISTA ENLAZADA DE TAREAS ──────────────────────────────────────────────────
+# ── LISTA DOBLEMENTE ENLAZADA DE TAREAS ───────────────────────────────────────
 
 class ListaTareas:
     """
-    Lista enlazada simple que gestiona los nodos de tarea
+    Lista doblemente enlazada que gestiona los nodos de tarea
     pertenecientes a una carpeta.
+
+    Mantiene punteros a la cabeza y a la cola
+    py el recorrido puede hacerse en ambos sentidos.
     """
 
     def __init__(self) -> None:
         self._cabeza: "NodoTarea | None" = None
+        self._cola: "NodoTarea | None" = None
         self._total: int = 0
 
     # ── propiedades ───────────────────────────────────────────
@@ -76,6 +90,10 @@ class ListaTareas:
     @property
     def cabeza(self) -> "NodoTarea | None":
         return self._cabeza
+
+    @property
+    def cola(self) -> "NodoTarea | None":
+        return self._cola
 
     @property
     def total(self) -> int:
@@ -96,6 +114,28 @@ class ListaTareas:
 
     # ── inserción ─────────────────────────────────────────────
 
+    def agregar_nodo(self, nodo: NodoTarea) -> NodoTarea:
+        """
+        Inserta un nodo ya construido al final de la lista.
+        Se utiliza al crear tareas nuevas.
+
+        Retorna
+        -------
+        NodoTarea
+            El mismo nodo insertado.
+        """
+        nodo.anterior = self._cola
+        nodo.siguiente = None
+
+        if self._cola is None:
+            self._cabeza = nodo
+        else:
+            self._cola.siguiente = nodo
+
+        self._cola = nodo
+        self._total += 1
+        return nodo
+
     def agregar(
         self,
         titulo: str,
@@ -103,33 +143,18 @@ class ListaTareas:
         prioridad: str = "media",
     ) -> NodoTarea:
         """
-        Inserta un nuevo NodoTarea al final de la lista.
-
-        Complejidad: O(n)
-
+        Crea e inserta un nuevo NodoTarea al final de la lista.
         Parámetros
         ----------
         titulo : str
         descripcion : str, optional
         prioridad : str, optional  'alta' | 'media' | 'baja'
-
         Retorna
         -------
         NodoTarea
             El nodo recién creado.
         """
-        nuevo = NodoTarea(titulo, descripcion, prioridad)
-
-        if self._cabeza is None:
-            self._cabeza = nuevo
-        else:
-            actual = self._cabeza
-            while actual.siguiente is not None:
-                actual = actual.siguiente
-            actual.siguiente = nuevo
-
-        self._total += 1
-        return nuevo
+        return self.agregar_nodo(NodoTarea(titulo, descripcion, prioridad))
 
     # ── búsqueda ──────────────────────────────────────────────
 
@@ -186,30 +211,31 @@ class ListaTareas:
 
     def eliminar(self, titulo: str) -> bool:
         """
-        Reenlaza los punteros para excluir el nodo buscado.
+        Localiza el nodo por título y lo desconecta de sus dos vecinos.
 
-        Complejidad: O(n)
+        Complejidad: O(n) por la búsqueda; el reenlace es O(1).
         """
-        if self._cabeza is None:
+        nodo = self.buscar(titulo)
+        if nodo is None:
             return False
 
-        # Caso: el nodo a eliminar es la cabeza
-        if self._cabeza.titulo == titulo:
-            self._cabeza = self._cabeza.siguiente
-            self._total -= 1
-            return True
+        # Enlazar el vecino anterior con el siguiente (o mover la cabeza)
+        if nodo.anterior is None:
+            self._cabeza = nodo.siguiente
+        else:
+            nodo.anterior.siguiente = nodo.siguiente
 
-        anterior = self._cabeza
-        actual = self._cabeza.siguiente
-        while actual is not None:
-            if actual.titulo == titulo:
-                anterior.siguiente = actual.siguiente
-                self._total -= 1
-                return True
-            anterior = actual
-            actual = actual.siguiente
+        # Enlazar el vecino siguiente con el anterior (o mover la cola)
+        if nodo.siguiente is None:
+            self._cola = nodo.anterior
+        else:
+            nodo.siguiente.anterior = nodo.anterior
 
-        return False
+        # Aislar el nodo eliminado para liberar sus referencias
+        nodo.anterior = None
+        nodo.siguiente = None
+        self._total -= 1
+        return True
 
     # ── recorrido ─────────────────────────────────────────────
 
@@ -220,6 +246,21 @@ class ListaTareas:
         while actual is not None:
             tareas.append(actual.to_dict())
             actual = actual.siguiente
+        return tareas
+
+    def obtener_todas_inverso(self) -> list[dict]:
+        """
+        Recorre la lista desde la cola hacia la cabeza usando los
+        punteros 'anterior'.
+
+        Demuestra la bidireccionalidad de la estructura.
+        Complejidad: O(n)
+        """
+        tareas = []
+        actual = self._cola
+        while actual is not None:
+            tareas.append(actual.to_dict())
+            actual = actual.anterior
         return tareas
 
     def filtrar_por_estado(self, estado: str) -> list[dict]:
@@ -235,16 +276,16 @@ class ListaTareas:
 
 class NodoCarpeta:
     """
-    Nodo de la lista enlazada de carpetas.
-
+    Nodo de la lista doblemente enlazada de carpetas.
     Cada carpeta contiene su propia ListaTareas independiente.
-
     Atributos
     ----------
     nombre : str
         Identificador único de la carpeta.
     tareas : ListaTareas
-        Lista enlazada de tareas dentro de esta carpeta.
+        Lista doblemente enlazada de tareas dentro de esta carpeta.
+    anterior : NodoCarpeta | None
+        Puntero al nodo previo de carpetas.
     siguiente : NodoCarpeta | None
         Puntero al siguiente nodo de carpetas.
     """
@@ -252,22 +293,34 @@ class NodoCarpeta:
     def __init__(self, nombre: str) -> None:
         self.nombre: str = nombre
         self.tareas: ListaTareas = ListaTareas()
+        self.anterior: "NodoCarpeta | None" = None
         self.siguiente: "NodoCarpeta | None" = None
 
-
-# ── LISTA ENLAZADA DE CARPETAS ────────────────────────────────────────────────
+# ── LISTA DOBLEMENTE ENLAZADA DE CARPETAS ─────────────────────────────────────
 
 class ListaCarpetas:
     """
-    Lista enlazada simple que gestiona las carpetas.
+    Lista doblemente enlazada que gestiona las carpetas.
     Cada carpeta es un NodoCarpeta con su propia ListaTareas.
+
+    Al igual que ListaTareas, conserva punteros a la cabeza y a la cola,
+    por lo que la inserción al final es O(1) y el recorrido es reversible.
     """
 
     def __init__(self) -> None:
         self._cabeza: "NodoCarpeta | None" = None
+        self._cola: "NodoCarpeta | None" = None
         self._total: int = 0
 
     # ── propiedades ───────────────────────────────────────────
+
+    @property
+    def cabeza(self) -> "NodoCarpeta | None":
+        return self._cabeza
+
+    @property
+    def cola(self) -> "NodoCarpeta | None":
+        return self._cola
 
     @property
     def total(self) -> int:
@@ -278,24 +331,28 @@ class ListaCarpetas:
 
     # ── inserción ─────────────────────────────────────────────
 
+    def agregar_nodo(self, nodo: NodoCarpeta) -> NodoCarpeta:
+        """
+        Inserta una carpeta ya construida al final de la lista.
+
+        """
+        nodo.anterior = self._cola
+        nodo.siguiente = None
+
+        if self._cola is None:
+            self._cabeza = nodo
+        else:
+            self._cola.siguiente = nodo
+
+        self._cola = nodo
+        self._total += 1
+        return nodo
+
     def agregar_carpeta(self, nombre: str) -> NodoCarpeta:
         """
         Crea e inserta una nueva carpeta al final de la lista.
-
-        Complejidad: O(n)
         """
-        nuevo = NodoCarpeta(nombre)
-
-        if self._cabeza is None:
-            self._cabeza = nuevo
-        else:
-            actual = self._cabeza
-            while actual.siguiente is not None:
-                actual = actual.siguiente
-            actual.siguiente = nuevo
-
-        self._total += 1
-        return nuevo
+        return self.agregar_nodo(NodoCarpeta(nombre))
 
     # ── búsqueda ──────────────────────────────────────────────
 
@@ -311,26 +368,30 @@ class ListaCarpetas:
     # ── eliminación ───────────────────────────────────────────
 
     def eliminar_carpeta(self, nombre: str) -> bool:
-        """Elimina la carpeta y todas sus tareas internas."""
-        if self._cabeza is None:
+        """
+        Elimina la carpeta y todas sus tareas internas, reenlazando
+        los punteros anterior y siguiente de sus vecinos.
+
+        Complejidad: O(m) por la búsqueda.
+        """
+        nodo = self.buscar_carpeta(nombre)
+        if nodo is None:
             return False
 
-        if self._cabeza.nombre == nombre:
-            self._cabeza = self._cabeza.siguiente
-            self._total -= 1
-            return True
+        if nodo.anterior is None:
+            self._cabeza = nodo.siguiente
+        else:
+            nodo.anterior.siguiente = nodo.siguiente
 
-        anterior = self._cabeza
-        actual = self._cabeza.siguiente
-        while actual is not None:
-            if actual.nombre == nombre:
-                anterior.siguiente = actual.siguiente
-                self._total -= 1
-                return True
-            anterior = actual
-            actual = actual.siguiente
+        if nodo.siguiente is None:
+            self._cola = nodo.anterior
+        else:
+            nodo.siguiente.anterior = nodo.anterior
 
-        return False
+        nodo.anterior = None
+        nodo.siguiente = None
+        self._total -= 1
+        return True
 
     # ── recorrido ─────────────────────────────────────────────
 
@@ -341,6 +402,15 @@ class ListaCarpetas:
         while actual is not None:
             nombres.append(actual.nombre)
             actual = actual.siguiente
+        return nombres
+
+    def obtener_nombres_inverso(self) -> list[str]:
+        """Devuelve los nombres desde la última carpeta hasta la primera."""
+        nombres = []
+        actual = self._cola
+        while actual is not None:
+            nombres.append(actual.nombre)
+            actual = actual.anterior
         return nombres
 
     def obtener_resumen(self) -> list[dict]:

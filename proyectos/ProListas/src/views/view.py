@@ -51,10 +51,21 @@ class TodoApp(tk.Tk):
         self._refresh_sidebar()
         self._refresh_list()
 
+        # Si el archivo de datos no pudo leerse, avisar tras dibujar la ventana
+        if self._controller.advertencia_inicial:
+            self.after(200, self._mostrar_advertencia_inicial)
+
+    def _mostrar_advertencia_inicial(self) -> None:
+        messagebox.showwarning(
+            "Persistencia",
+            self._controller.advertencia_inicial,
+            parent=self,
+        )
+
     # ── configuración de ventana ──────────────────────────────
 
     def _build_window(self) -> None:
-        self.title("To-Do List · Carpetas · Lista Enlazada")
+        self.title("To-Do List · Carpetas · Lista Doble")
         self.geometry("820x680")
         self.minsize(700, 500)
         self.configure(bg=BG_MAIN)
@@ -115,6 +126,17 @@ class TodoApp(tk.Tk):
         # Contenedor scrollable de carpetas
         self._sidebar_list = tk.Frame(self._sidebar, bg=BG_CARD)
         self._sidebar_list.pack(fill="both", expand=True, pady=8)
+
+        # Indicador de persistencia
+        tk.Frame(self._sidebar, bg=BORDER, height=1).pack(fill="x")
+        tk.Label(
+            self._sidebar,
+            text="💾 Guardado automático",
+            bg=BG_CARD,
+            fg=TEXT_MUTED,
+            font=("Courier New", 8),
+            pady=6,
+        ).pack(fill="x")
 
     def _refresh_sidebar(self) -> None:
         for widget in self._sidebar_list.winfo_children():
@@ -457,6 +479,132 @@ class TodoApp(tk.Tk):
         else:
             messagebox.showwarning("Atención", msg, parent=self)
 
+    def _editar_tarea(self, titulo: str, descripcion: str, prioridad: str) -> None:
+        """Abre un diálogo modal para editar la descripción y la prioridad."""
+        dialogo = tk.Toplevel(self)
+        dialogo.title("Editar tarea")
+        dialogo.configure(bg=BG_CARD)
+        dialogo.resizable(False, False)
+        dialogo.transient(self)
+        dialogo.grab_set()
+        dialogo.bind("<Escape>", lambda _e: dialogo.destroy())
+
+        tk.Label(
+            dialogo,
+            text=titulo,
+            bg=BG_CARD,
+            fg=TEXT_MAIN,
+            font=("Courier New", 12, "bold"),
+            anchor="w",
+        ).pack(fill="x", padx=16, pady=(14, 8))
+
+        tk.Label(
+            dialogo,
+            text="Descripción",
+            bg=BG_CARD,
+            fg=TEXT_MUTED,
+            font=("Courier New", 9),
+            anchor="w",
+        ).pack(fill="x", padx=16)
+
+        texto = tk.Text(
+            dialogo,
+            bg=BG_INPUT,
+            fg=TEXT_MAIN,
+            insertbackground=ACCENT,
+            relief="flat",
+            font=("Courier New", 10),
+            height=4,
+            width=46,
+            highlightthickness=1,
+            highlightbackground=BORDER,
+            highlightcolor=ACCENT,
+            wrap="word",
+        )
+        texto.pack(fill="x", padx=16, pady=(4, 10))
+        texto.insert("1.0", descripcion)
+
+        tk.Label(
+            dialogo,
+            text="Prioridad",
+            bg=BG_CARD,
+            fg=TEXT_MUTED,
+            font=("Courier New", 9),
+            anchor="w",
+        ).pack(fill="x", padx=16)
+
+        var_prioridad = tk.StringVar(value=prioridad)
+        fila_prioridad = tk.Frame(dialogo, bg=BG_CARD)
+        fila_prioridad.pack(fill="x", padx=16, pady=(4, 14))
+
+        for valor, etiqueta in [("alta", "🔴 Alta"), ("media", "🟡 Media"), ("baja", "🟢 Baja")]:
+            tk.Radiobutton(
+                fila_prioridad,
+                text=etiqueta,
+                variable=var_prioridad,
+                value=valor,
+                bg=BG_CARD,
+                fg=TEXT_MUTED,
+                selectcolor=BG_CARD,
+                activebackground=BG_CARD,
+                activeforeground=ACCENT,
+                font=("Courier New", 10),
+                cursor="hand2",
+            ).pack(side="left", padx=(0, 10))
+
+        botones = tk.Frame(dialogo, bg=BG_CARD)
+        botones.pack(fill="x", padx=16, pady=(0, 14))
+
+        def guardar() -> None:
+            nueva_descripcion = texto.get("1.0", "end-1c").strip()
+            ok, msg = self._controller.editar_tarea(
+                titulo,
+                self._carpeta_activa,
+                nueva_descripcion=nueva_descripcion,
+                nueva_prioridad=var_prioridad.get(),
+            )
+            if ok:
+                dialogo.destroy()
+                self._refresh_sidebar()
+                self._refresh_list()
+            else:
+                messagebox.showwarning("Atención", msg, parent=dialogo)
+
+        tk.Button(
+            botones,
+            text="Guardar",
+            command=guardar,
+            bg=ACCENT,
+            fg=TEXT_MAIN,
+            activebackground=ACCENT_HOVER,
+            activeforeground=TEXT_MAIN,
+            relief="flat",
+            font=("Courier New", 10, "bold"),
+            cursor="hand2",
+            bd=0,
+            padx=14,
+            pady=6,
+        ).pack(side="right")
+
+        tk.Button(
+            botones,
+            text="Cancelar",
+            command=dialogo.destroy,
+            bg=BG_INPUT,
+            fg=TEXT_MUTED,
+            activebackground=BORDER_ACTIVE,
+            activeforeground=TEXT_MAIN,
+            relief="flat",
+            font=("Courier New", 10),
+            cursor="hand2",
+            bd=0,
+            padx=14,
+            pady=6,
+        ).pack(side="right", padx=(0, 8))
+
+        texto.focus_set()
+        dialogo.wait_window()
+
     def _toggle_estado(self, titulo: str, estado_actual: str) -> None:
         if estado_actual == "pendiente":
             self._controller.marcar_completada(titulo, self._carpeta_activa)
@@ -582,6 +730,17 @@ class TodoApp(tk.Tk):
         )
         btn_del.pack(side="right")
 
+        # Botón editar
+        btn_edit = tk.Label(
+            row1,
+            text="✎",
+            bg=BG_CARD,
+            fg=ACCENT,
+            font=("Courier New", 13, "bold"),
+            cursor="hand2",
+        )
+        btn_edit.pack(side="right", padx=(0, 4))
+
         # Fila 2: descripción (si existe)
         if descripcion:
             tk.Label(
@@ -615,6 +774,10 @@ class TodoApp(tk.Tk):
         btn_del.bind(
             "<Button-1>",
             lambda _e, t=titulo: self._eliminar_tarea(t),
+        )
+        btn_edit.bind(
+            "<Button-1>",
+            lambda _e, t=titulo, d=descripcion, p=prioridad: self._editar_tarea(t, d, p),
         )
 
         def on_enter(_e: tk.Event) -> None:

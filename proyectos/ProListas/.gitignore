@@ -34,3 +34,6 @@ desktop.ini
 
 # ── Logs ─────────────────────────────────────────────────────
 *.log
+
+# ── Datos persistidos (se generan en tiempo de ejecución) ────
+data/

@@ -6,6 +6,9 @@ Valida entradas, delega al Modelo y devuelve
 tuplas (éxito: bool, mensaje: str).
 """
 
+from pathlib import Path
+
+from models import storage
 from models.model import ListaCarpetas, PRIORIDADES_VALIDAS
 
 
@@ -22,15 +25,55 @@ class TareasController:
     """
     Gestiona carpetas y las tareas dentro de cada una.
 
+    Persiste automáticamente en un archivo JSON después de cada cambio
+    y restaura la estructura al construir el controlador.
+
     Todas las operaciones retornan una tupla:
         (True,  mensaje_de_exito)
         (False, mensaje_de_error)
     """
 
-    def __init__(self) -> None:
-        self._lista_carpetas: ListaCarpetas = ListaCarpetas()
+    def __init__(self, ruta_datos: str | Path | None = None) -> None:
+        self._ruta_datos: Path = (
+            Path(ruta_datos)
+            if ruta_datos is not None
+            else storage.RUTA_DATOS_PREDETERMINADA
+        )
+        self._lista_carpetas, self.advertencia_inicial = storage.cargar(
+            self._ruta_datos
+        )
+
         # Carpeta por defecto para tareas sin asignar
-        self._lista_carpetas.agregar_carpeta("General")
+        if self._lista_carpetas.buscar_carpeta("General") is None:
+            self._lista_carpetas.agregar_carpeta("General")
+            aviso = self._persistir()
+            if aviso is not None and self.advertencia_inicial is None:
+                self.advertencia_inicial = aviso
+
+    # ── persistencia ──────────────────────────────────────────
+
+    @property
+    def ruta_datos(self) -> Path:
+        """Ruta del archivo JSON donde se guardan las tareas."""
+        return self._ruta_datos
+
+    def _persistir(self) -> str | None:
+        """
+        Guarda el estado actual en disco.
+
+        Retorna None si todo fue bien o el mensaje de error, para que las
+        operaciones puedan informar a la Vista sin perder el cambio en
+        memoria.
+        """
+        ok, mensaje = storage.guardar(self._lista_carpetas, self._ruta_datos)
+        return None if ok else mensaje
+
+    def _confirmar(self, mensaje: str) -> tuple[bool, str]:
+        """Persiste el cambio y añade un aviso si el guardado falló."""
+        aviso = self._persistir()
+        if aviso is not None:
+            return True, f"{mensaje} ⚠ {aviso}"
+        return True, mensaje
 
     # ══════════════════════════════════════════════════════════
     # CARPETAS
@@ -50,7 +93,7 @@ class TareasController:
             return False, f'Ya existe una carpeta llamada "{nombre}".'
 
         self._lista_carpetas.agregar_carpeta(nombre)
-        return True, f'Carpeta "{nombre}" creada.'
+        return self._confirmar(f'Carpeta "{nombre}" creada.')
 
     def eliminar_carpeta(self, nombre: str) -> tuple[bool, str]:
         """
@@ -62,7 +105,7 @@ class TareasController:
 
         ok = self._lista_carpetas.eliminar_carpeta(nombre)
         if ok:
-            return True, f'Carpeta "{nombre}" eliminada.'
+            return self._confirmar(f'Carpeta "{nombre}" eliminada.')
         return False, f'No se encontró la carpeta "{nombre}".'
 
     def obtener_carpetas(self) -> list[str]:
@@ -86,7 +129,6 @@ class TareasController:
     ) -> tuple[bool, str]:
         """
         Agrega una tarea a la carpeta indicada.
-
         Parámetros
         ----------
         titulo : str
@@ -119,7 +161,7 @@ class TareasController:
             return False, f'Ya existe una tarea llamada "{titulo}" en esta carpeta.'
 
         nodo_carpeta.tareas.agregar(titulo, descripcion, prioridad)
-        return True, f'Tarea "{titulo}" agregada en "{carpeta}".'
+        return self._confirmar(f'Tarea "{titulo}" agregada en "{carpeta}".')
 
     def editar_tarea(
         self,
@@ -140,7 +182,7 @@ class TareasController:
 
         ok = nodo_carpeta.tareas.actualizar(titulo, nueva_descripcion, nueva_prioridad)
         if ok:
-            return True, f'Tarea "{titulo}" actualizada.'
+            return self._confirmar(f'Tarea "{titulo}" actualizada.')
         return False, f'No se encontró la tarea "{titulo}" en "{carpeta}".'
 
     def marcar_completada(self, titulo: str, carpeta: str) -> tuple[bool, str]:
@@ -149,7 +191,7 @@ class TareasController:
             return False, f'La carpeta "{carpeta}" no existe.'
         ok = nodo_carpeta.tareas.marcar_completada(titulo)
         if ok:
-            return True, f'"{titulo}" marcada como completada.'
+            return self._confirmar(f'"{titulo}" marcada como completada.')
         return False, f'No se encontró la tarea "{titulo}".'
 
     def marcar_pendiente(self, titulo: str, carpeta: str) -> tuple[bool, str]:
@@ -158,7 +200,7 @@ class TareasController:
             return False, f'La carpeta "{carpeta}" no existe.'
         ok = nodo_carpeta.tareas.marcar_pendiente(titulo)
         if ok:
-            return True, f'"{titulo}" marcada como pendiente.'
+            return self._confirmar(f'"{titulo}" marcada como pendiente.')
         return False, f'No se encontró la tarea "{titulo}".'
 
     def eliminar_tarea(self, titulo: str, carpeta: str) -> tuple[bool, str]:
@@ -167,7 +209,7 @@ class TareasController:
             return False, f'La carpeta "{carpeta}" no existe.'
         ok = nodo_carpeta.tareas.eliminar(titulo)
         if ok:
-            return True, f'Tarea "{titulo}" eliminada.'
+            return self._confirmar(f'Tarea "{titulo}" eliminada.')
         return False, f'No se encontró la tarea "{titulo}" en "{carpeta}".'
 
     # ══════════════════════════════════════════════════════════
